@@ -133,17 +133,43 @@ export async function GET() {
       .select('*')
       .order('monthly_price', { ascending: true });
 
-    if (error || !data || data.length === 0) {
+    if (error) {
       return NextResponse.json({
         success: true,
         packages: DEFAULT_PACKAGES,
         fromSupabase: false,
-        needsSchema: Boolean(error?.message?.includes('not find the table')),
-        message: error ? error.message : 'No packages found, using defaults',
+        needsSchema: Boolean(error.message?.includes('not find the table')),
+        message: error.message,
       });
     }
 
-    const mapped = data.map((p) => normalizePackage(p));
+    // Count active subscribers per package from Supabase Auth
+    const subscriberCounts: Record<string, number> = {};
+    try {
+      const { data: userRes } = await client.auth.admin.listUsers();
+      for (const u of userRes?.users || []) {
+        const meta = u.user_metadata || {};
+        const isActive = (meta.status || (meta.plan ? 'Active' : 'No plan')) === 'Active';
+        if (isActive && meta.plan) {
+          const key = String(meta.plan).trim().toLowerCase();
+          subscriberCounts[key] = (subscriberCounts[key] || 0) + 1;
+        }
+      }
+    } catch {
+      // Non-fatal: keep DB counts if auth listing fails
+    }
+
+    const mapped = (data || []).map((p) => {
+      const pkg = normalizePackage(p);
+      const countByName = subscriberCounts[pkg.name.trim().toLowerCase()] || 0;
+      const countByCode = subscriberCounts[pkg.code.trim().toLowerCase()] || 0;
+      const liveCount = countByName || countByCode;
+      return {
+        ...pkg,
+        subscribersCount: liveCount,
+        subscribers_count: liveCount,
+      };
+    });
 
     return NextResponse.json({
       success: true,
@@ -171,14 +197,24 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { id, name, code, description, monthlyPrice, yearlyPrice, interval, terminals, status, popular, features, subscribersCount } = body;
 
+    const cleanName = typeof name === 'string' ? name.trim() : '';
+    if (!cleanName) {
+      return NextResponse.json({ success: false, error: 'Package name is required.' }, { status: 400 });
+    }
+
+    const normalizedCode = (typeof code === 'string' && code.trim()
+      ? code.trim()
+      : cleanName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '')
+    ) || `PKG_${Date.now()}`;
+
     const mPrice = Number(monthlyPrice ?? 999);
     const yPrice = Number(yearlyPrice ?? 9999);
 
     const row = {
       id: id || `pkg-${Date.now()}`,
-      name,
-      code: code || name.toUpperCase().replace(/\s+/g, '_'),
-      description,
+      name: cleanName,
+      code: normalizedCode,
+      description: typeof description === 'string' ? description.trim() : '',
       monthly_price: isNaN(mPrice) ? 999 : mPrice,
       yearly_price: isNaN(yPrice) ? 9999 : yPrice,
       interval: interval || 'Yearly',
@@ -193,9 +229,12 @@ export async function POST(req: NextRequest) {
     const { data, error } = await client.from('packages').upsert(row).select().single();
 
     if (error) {
+      const friendlyError = error.message.includes('packages_code_key')
+        ? `A package with code "${normalizedCode}" already exists. Choose a different package name.`
+        : error.message;
       return NextResponse.json({
         success: false,
-        error: error.message,
+        error: friendlyError,
         needsSchema: Boolean(error.message.includes('not find the table')),
       }, { status: 400 });
     }

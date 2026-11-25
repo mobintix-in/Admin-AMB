@@ -48,7 +48,7 @@ export default function UsersPage() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('123456');
-  const [newUserPlan, setNewUserPlan] = useState('Yearly');
+  const [newUserPlan, setNewUserPlan] = useState('No plan');
   const [newUserDuration, setNewUserDuration] = useState('1 year');
   const [newUserExpires, setNewUserExpires] = useState('29 Oct 2028');
   const [newUserUtr, setNewUserUtr] = useState('');
@@ -76,7 +76,12 @@ export default function UsersPage() {
         setUsers(uJson.users || []);
       }
       if (pJson.success) {
-        setPackages(pJson.packages || []);
+        const loadedPkgs: PackageOption[] = pJson.packages || [];
+        setPackages(loadedPkgs);
+        setNewUserPlan((prev) => {
+          if (prev === 'No plan' || loadedPkgs.some((p) => p.name === prev)) return prev;
+          return loadedPkgs[0]?.name || 'No plan';
+        });
       }
     } catch (e) {
       console.error('Failed to load data:', e);
@@ -94,12 +99,14 @@ export default function UsersPage() {
 
   // Activate user subscription in Supabase
   const handleActivate = async (user: AdminUser) => {
+    const fallbackPlan = user.plan || packages[0]?.name || 'Starter Retail';
+    const prevUsers = users;
     const updatedUsers = users.map((u) =>
       u.id === user.id
         ? {
             ...u,
             status: 'Active' as const,
-            plan: u.plan || 'Yearly',
+            plan: fallbackPlan,
             plan_duration: u.plan_duration || '1 year',
             expires_at: u.expires_at || '29 Oct 2028',
           }
@@ -108,19 +115,26 @@ export default function UsersPage() {
     setUsers(updatedUsers);
 
     try {
-      await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.id,
           status: 'Active',
-          plan: user.plan || 'Yearly',
+          plan: fallbackPlan,
           plan_duration: user.plan_duration || '1 year',
           expires_at: user.expires_at || '29 Oct 2028',
         }),
       });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        alert(json.error || 'Failed to activate user subscription.');
+        setUsers(prevUsers);
+      }
     } catch (err) {
       console.error(err);
+      alert('Network error activating user.');
+      setUsers(prevUsers);
     }
   };
 
@@ -128,6 +142,7 @@ export default function UsersPage() {
   const handleRevoke = async (user: AdminUser) => {
     if (!confirm(`Revoke commercial subscription for ${user.name}?`)) return;
 
+    const prevUsers = users;
     const updatedUsers = users.map((u) =>
       u.id === user.id
         ? {
@@ -142,7 +157,7 @@ export default function UsersPage() {
     setUsers(updatedUsers);
 
     try {
-      await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -153,15 +168,22 @@ export default function UsersPage() {
           expires_at: null,
         }),
       });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        alert(json.error || 'Failed to revoke subscription.');
+        setUsers(prevUsers);
+      }
     } catch (err) {
       console.error(err);
+      alert('Network error revoking subscription.');
+      setUsers(prevUsers);
     }
   };
 
   // Open modal to change package for a particular user
   const openChangePackageModal = (user: AdminUser) => {
     setSelectedUserForPlan(user);
-    setPlanTier(user.plan || (packages[0]?.name || 'Yearly'));
+    setPlanTier(user.plan || (packages[0]?.name || 'No plan'));
     setPlanDuration(user.plan_duration || '1 year');
     setUtrRef(user.utr_ref || '');
     setUtrNote(user.utr_note || 'Previous payment');
@@ -176,23 +198,9 @@ export default function UsersPage() {
     setIsSubmitting(true);
 
     const isNoPlan = planTier === 'No plan';
-    const updatedUsers = users.map((u) =>
-      u.id === selectedUserForPlan.id
-        ? {
-            ...u,
-            status: isNoPlan ? ('No plan' as const) : ('Active' as const),
-            plan: isNoPlan ? undefined : planTier,
-            plan_duration: isNoPlan ? undefined : planDuration,
-            utr_ref: utrRef.trim() || undefined,
-            utr_note: utrNote.trim() || undefined,
-            expires_at: isNoPlan ? undefined : expiresAt,
-          }
-        : u
-    );
-    setUsers(updatedUsers);
 
     try {
-      await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -205,11 +213,19 @@ export default function UsersPage() {
           expires_at: isNoPlan ? null : expiresAt,
         }),
       });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        alert(json.error || 'Failed to update package in Supabase.');
+        return;
+      }
+
+      setSelectedUserForPlan(null);
+      await loadData();
     } catch (err) {
       console.error(err);
+      alert('Network error updating package.');
     } finally {
       setIsSubmitting(false);
-      setSelectedUserForPlan(null);
     }
   };
 
@@ -300,21 +316,12 @@ export default function UsersPage() {
       <AdminSidebar usersCount={users.length} />
 
       <div className="flex-1 min-w-0 flex flex-col min-h-screen overflow-y-auto">
-        {/* Top Header Bar matching InvoicePro Admin */}
+        {/* Top Header Bar */}
         <header className="h-16 bg-white border-b border-slate-200/80 px-6 sm:px-8 flex items-center justify-end gap-3 sticky top-0 z-30 select-none">
-          <span className="text-xs text-slate-600 font-medium">
-            AMB Admin
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200">
+            <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+            <span>AMB Admin</span>
           </span>
-          <button
-            onClick={() => {
-              if (confirm('Sign out from AMB Admin Console?')) {
-                window.location.href = '/login';
-              }
-            }}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
-          >
-            Sign out
-          </button>
         </header>
 
         {/* Main Content Area */}
@@ -352,11 +359,16 @@ export default function UsersPage() {
               </button>
 
               <button
-                onClick={() => setIsCreateModalOpen(true)}
+                onClick={() => {
+                  if (newUserPlan === 'No plan' && packages.length > 0) {
+                    setNewUserPlan(packages[0].name);
+                  }
+                  setIsCreateModalOpen(true);
+                }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5"
               >
                 <Plus className="w-4 h-4 stroke-[2.5]" />
-                <span>+ Create User</span>
+                <span>Create User</span>
               </button>
             </div>
           </div>
@@ -574,6 +586,9 @@ export default function UsersPage() {
                       {pkg.name} (₹{pkg.monthlyPrice ? Number(pkg.monthlyPrice).toLocaleString('en-IN') : '0'}/mo)
                     </option>
                   ))}
+                  {planTier !== 'No plan' && planTier !== 'Lifetime' && !packages.some((p) => p.name === planTier) && (
+                    <option value={planTier}>{planTier}</option>
+                  )}
                   <option value="Lifetime">Lifetime Unlimited Access</option>
                 </select>
               </div>
@@ -613,7 +628,7 @@ export default function UsersPage() {
                       type="text"
                       value={utrRef}
                       onChange={(e) => setUtrRef(e.target.value)}
-                      placeholder="e.g. aryanbhimani0011@gmail.com or UTR-982104"
+                      placeholder="e.g. UTR-982104 or UPI Ref"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-mono focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
