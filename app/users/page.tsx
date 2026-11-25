@@ -31,6 +31,55 @@ interface PackageOption {
   yearlyPrice: number;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function computeExpiryIso(duration: string): string {
+  if (duration.toLowerCase() === 'lifetime') return '2099-12-31';
+  const d = new Date();
+  const lower = duration.toLowerCase();
+  if (lower.includes('3 month')) {
+    d.setMonth(d.getMonth() + 3);
+  } else if (lower.includes('6 month')) {
+    d.setMonth(d.getMonth() + 6);
+  } else if (lower.includes('1 month') || lower === 'monthly') {
+    d.setMonth(d.getMonth() + 1);
+  } else {
+    d.setFullYear(d.getFullYear() + 1);
+  }
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function toIsoDateValue(value?: string): string {
+  if (!value) return computeExpiryIso('1 year');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
+  const parsed = new Date(value);
+  if (!isNaN(parsed.getTime())) {
+    const yyyy = parsed.getFullYear();
+    const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+    const dd = String(parsed.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return computeExpiryIso('1 year');
+}
+
+function formatDisplayExpiry(isoOrText: string): string {
+  if (!isoOrText) return '';
+  if (isoOrText === '2099-12-31') return 'Lifetime';
+  const match = isoOrText.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const year = match[1];
+    const monthIdx = parseInt(match[2], 10) - 1;
+    const day = parseInt(match[3], 10);
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${day} ${MONTHS[monthIdx]} ${year}`;
+    }
+  }
+  return isoOrText;
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [packages, setPackages] = useState<PackageOption[]>([]);
@@ -50,16 +99,16 @@ export default function UsersPage() {
   const [newUserPassword, setNewUserPassword] = useState('123456');
   const [newUserPlan, setNewUserPlan] = useState('No plan');
   const [newUserDuration, setNewUserDuration] = useState('1 year');
-  const [newUserExpires, setNewUserExpires] = useState('29 Oct 2028');
+  const [newUserExpires, setNewUserExpires] = useState('2027-11-25');
   const [newUserUtr, setNewUserUtr] = useState('');
   const [newUserGoogle, setNewUserGoogle] = useState(false);
 
   // Edit / Change Package Form State
-  const [planTier, setPlanTier] = useState<string>('Yearly');
+  const [planTier, setPlanTier] = useState<string>('No plan');
   const [planDuration, setPlanDuration] = useState<string>('1 year');
   const [utrRef, setUtrRef] = useState<string>('');
   const [utrNote, setUtrNote] = useState<string>('Previous payment');
-  const [expiresAt, setExpiresAt] = useState<string>('29 Oct 2028');
+  const [expiresAt, setExpiresAt] = useState<string>('2027-11-25');
 
   // Load both users and packages from Supabase
   const loadData = async () => {
@@ -100,6 +149,7 @@ export default function UsersPage() {
   // Activate user subscription in Supabase
   const handleActivate = async (user: AdminUser) => {
     const fallbackPlan = user.plan || packages[0]?.name || 'Starter Retail';
+    const defaultExpiry = user.expires_at || formatDisplayExpiry(computeExpiryIso('1 year'));
     const prevUsers = users;
     const updatedUsers = users.map((u) =>
       u.id === user.id
@@ -108,7 +158,7 @@ export default function UsersPage() {
             status: 'Active' as const,
             plan: fallbackPlan,
             plan_duration: u.plan_duration || '1 year',
-            expires_at: u.expires_at || '29 Oct 2028',
+            expires_at: defaultExpiry,
           }
         : u
     );
@@ -123,7 +173,7 @@ export default function UsersPage() {
           status: 'Active',
           plan: fallbackPlan,
           plan_duration: user.plan_duration || '1 year',
-          expires_at: user.expires_at || '29 Oct 2028',
+          expires_at: defaultExpiry,
         }),
       });
       const json = await res.json();
@@ -182,12 +232,13 @@ export default function UsersPage() {
 
   // Open modal to change package for a particular user
   const openChangePackageModal = (user: AdminUser) => {
+    const initialDuration = user.plan_duration || '1 year';
     setSelectedUserForPlan(user);
     setPlanTier(user.plan || (packages[0]?.name || 'No plan'));
-    setPlanDuration(user.plan_duration || '1 year');
+    setPlanDuration(initialDuration);
     setUtrRef(user.utr_ref || '');
     setUtrNote(user.utr_note || 'Previous payment');
-    setExpiresAt(user.expires_at || '29 Oct 2028');
+    setExpiresAt(user.expires_at ? toIsoDateValue(user.expires_at) : computeExpiryIso(initialDuration));
   };
 
   // Save updated package for user in Supabase
@@ -198,6 +249,7 @@ export default function UsersPage() {
     setIsSubmitting(true);
 
     const isNoPlan = planTier === 'No plan';
+    const formattedExpiry = formatDisplayExpiry(expiresAt || computeExpiryIso(planDuration));
 
     try {
       const res = await fetch('/api/admin/users', {
@@ -210,7 +262,7 @@ export default function UsersPage() {
           plan_duration: isNoPlan ? null : planDuration,
           utr_ref: utrRef.trim() || null,
           utr_note: utrNote.trim() || null,
-          expires_at: isNoPlan ? null : expiresAt,
+          expires_at: isNoPlan ? null : formattedExpiry,
         }),
       });
       const json = await res.json();
@@ -247,7 +299,7 @@ export default function UsersPage() {
           plan: newUserPlan === 'No plan' ? null : newUserPlan,
           plan_duration: newUserPlan === 'No plan' ? null : newUserDuration,
           status: newUserPlan === 'No plan' ? 'No plan' : 'Active',
-          expires_at: newUserPlan === 'No plan' ? null : newUserExpires,
+          expires_at: newUserPlan === 'No plan' ? null : formatDisplayExpiry(newUserExpires),
           utr_ref: newUserUtr.trim() || null,
           google: newUserGoogle,
         }),
@@ -363,6 +415,7 @@ export default function UsersPage() {
                   if (newUserPlan === 'No plan' && packages.length > 0) {
                     setNewUserPlan(packages[0].name);
                   }
+                  setNewUserExpires(computeExpiryIso(newUserDuration));
                   setIsCreateModalOpen(true);
                 }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5"
@@ -586,10 +639,9 @@ export default function UsersPage() {
                       {pkg.name} (₹{pkg.monthlyPrice ? Number(pkg.monthlyPrice).toLocaleString('en-IN') : '0'}/mo)
                     </option>
                   ))}
-                  {planTier !== 'No plan' && planTier !== 'Lifetime' && !packages.some((p) => p.name === planTier) && (
+                  {planTier !== 'No plan' && !packages.some((p) => p.name === planTier) && (
                     <option value={planTier}>{planTier}</option>
                   )}
-                  <option value="Lifetime">Lifetime Unlimited Access</option>
                 </select>
               </div>
 
@@ -599,7 +651,11 @@ export default function UsersPage() {
                     <label className="font-semibold text-slate-700">Billing Duration *</label>
                     <select
                       value={planDuration}
-                      onChange={(e) => setPlanDuration(e.target.value)}
+                      onChange={(e) => {
+                        const nextDur = e.target.value;
+                        setPlanDuration(nextDur);
+                        setExpiresAt(computeExpiryIso(nextDur));
+                      }}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:ring-2 focus:ring-indigo-500"
                     >
                       <option value="1 month">1 Month</option>
@@ -611,12 +667,16 @@ export default function UsersPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="font-semibold text-slate-700">Expiration Date *</label>
+                    <div className="flex items-center justify-between">
+                      <label className="font-semibold text-slate-700">Expiration Date *</label>
+                      <span className="text-[11px] font-mono text-indigo-600 font-semibold">
+                        {formatDisplayExpiry(expiresAt)}
+                      </span>
+                    </div>
                     <input
-                      type="text"
-                      value={expiresAt}
+                      type="date"
+                      value={toIsoDateValue(expiresAt)}
                       onChange={(e) => setExpiresAt(e.target.value)}
-                      placeholder="e.g. 29 Oct 2028 or 19 Dec 2027"
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
                       required
                     />
@@ -771,16 +831,42 @@ export default function UsersPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="font-semibold text-slate-700">Duration</label>
-                  <input
-                    type="text"
+                  <label className="font-semibold text-slate-700">Billing Duration</label>
+                  <select
                     value={newUserDuration}
-                    onChange={(e) => setNewUserDuration(e.target.value)}
-                    placeholder="1 year"
+                    onChange={(e) => {
+                      const nextDur = e.target.value;
+                      setNewUserDuration(nextDur);
+                      setNewUserExpires(computeExpiryIso(nextDur));
+                    }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:ring-2 focus:ring-indigo-500"
-                  />
+                  >
+                    <option value="1 month">1 Month</option>
+                    <option value="3 months">3 Months</option>
+                    <option value="6 months">6 Months</option>
+                    <option value="1 year">1 Year (Annual)</option>
+                    <option value="Lifetime">Lifetime Unlimited</option>
+                  </select>
                 </div>
               </div>
+
+              {newUserPlan !== 'No plan' && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-semibold text-slate-700">Expiration Date *</label>
+                    <span className="text-[11px] font-mono text-indigo-600 font-semibold">
+                      {formatDisplayExpiry(newUserExpires)}
+                    </span>
+                  </div>
+                  <input
+                    type="date"
+                    value={toIsoDateValue(newUserExpires)}
+                    onChange={(e) => setNewUserExpires(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="font-semibold text-slate-700">Payment Reference / UTR (Optional)</label>
