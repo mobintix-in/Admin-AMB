@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { requireAdminSession } from '@/lib/admin-auth';
 
 interface PackageDto {
   id: string;
@@ -117,7 +118,11 @@ function normalizePackage(p: any): PackageDto {
   };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const session = await requireAdminSession(req);
+  if (!session) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
   const client = getAdminClient();
   if (!client) {
     return NextResponse.json({
@@ -188,6 +193,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireAdminSession(req);
+  if (!session) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
   const client = getAdminClient();
   if (!client) {
     return NextResponse.json({ success: false, error: 'Database service unavailable' }, { status: 500 });
@@ -251,6 +260,10 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const session = await requireAdminSession(req);
+  if (!session) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
   const client = getAdminClient();
   if (!client) {
     return NextResponse.json({ success: false, error: 'Database service unavailable' }, { status: 500 });

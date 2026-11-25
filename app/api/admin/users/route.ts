@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient, AdminUser } from '@/lib/supabase';
+import { requireAdminSession } from '@/lib/admin-auth';
 
 // GET: List all users from Supabase Auth
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const session = await requireAdminSession(req);
+  if (!session) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
   const client = getAdminClient();
   if (!client) {
     return NextResponse.json({ success: false, error: 'Supabase admin client unavailable' }, { status: 500 });
@@ -56,6 +61,10 @@ export async function GET() {
 
 // POST: Create a brand new user in Supabase Auth
 export async function POST(req: NextRequest) {
+  const session = await requireAdminSession(req);
+  if (!session) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
   const client = getAdminClient();
   if (!client) {
     return NextResponse.json({ success: false, error: 'Supabase admin client unavailable' }, { status: 500 });
@@ -114,6 +123,10 @@ export async function POST(req: NextRequest) {
 
 // PATCH: Change package, plan, duration, or status for a particular user in Supabase
 export async function PATCH(req: NextRequest) {
+  const session = await requireAdminSession(req);
+  if (!session) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
   const client = getAdminClient();
   if (!client) {
     return NextResponse.json({ success: false, error: 'Supabase admin client unavailable' }, { status: 500 });
@@ -164,6 +177,10 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE: Delete a user permanently from Supabase Auth
 export async function DELETE(req: NextRequest) {
+  const session = await requireAdminSession(req);
+  if (!session) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
   const client = getAdminClient();
   if (!client) {
     return NextResponse.json({ success: false, error: 'Supabase admin client unavailable' }, { status: 500 });
