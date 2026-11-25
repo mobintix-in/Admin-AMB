@@ -60,10 +60,16 @@ export default function PackagesPage() {
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formMonthlyPrice, setFormMonthlyPrice] = useState(999);
-  const [formYearlyPrice, setFormYearlyPrice] = useState(9999);
+  const [formYearlyPrice, setFormYearlyPrice] = useState(3999);
   const [formTerminals, setFormTerminals] = useState('1 Counter Terminal');
   const [formFeatures, setFormFeatures] = useState('POS Billing\nFEFO Expiry\nUPI QR');
   const [formStatus, setFormStatus] = useState<'Active' | 'Draft'>('Active');
+
+  // Merchant Direct UPI Payment Gateway Config
+  const [merchantUpiId, setMerchantUpiId] = useState('9409862204@kotakbank');
+  const [merchantPayeeName, setMerchantPayeeName] = useState('Mobintix Infotech');
+  const [savingUpi, setSavingUpi] = useState(false);
+  const [upiSavedMsg, setUpiSavedMsg] = useState<string | null>(null);
 
   const formatPrice = (val?: number) => {
     const num = Number(val || 0);
@@ -107,7 +113,43 @@ export default function PackagesPage() {
 
   useEffect(() => {
     loadPackages();
+    fetch('/api/admin/payment-config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (json?.success) {
+          if (json.upiId) setMerchantUpiId(json.upiId);
+          if (json.payeeName) setMerchantPayeeName(json.payeeName);
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  const handleSaveUpiConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingUpi(true);
+    setUpiSavedMsg(null);
+    try {
+      const res = await fetch('/api/admin/payment-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          upiId: merchantUpiId.trim(),
+          payeeName: merchantPayeeName.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        alert(json.error || 'Failed to save UPI ID.');
+      } else {
+        setUpiSavedMsg('Receiving UPI ID updated for AMB QR payments!');
+        setTimeout(() => setUpiSavedMsg(null), 3000);
+      }
+    } catch {
+      alert('Network error saving UPI ID.');
+    } finally {
+      setSavingUpi(false);
+    }
+  };
 
   const openCreateModal = () => {
     setEditingPackage(null);
@@ -224,9 +266,9 @@ CREATE TABLE IF NOT EXISTS public.packages (
     code VARCHAR(50) UNIQUE NOT NULL,
     description TEXT,
     monthly_price NUMERIC(12, 2) NOT NULL DEFAULT 999.00,
-    yearly_price NUMERIC(12, 2) NOT NULL DEFAULT 9999.00,
+    yearly_price NUMERIC(12, 2) NOT NULL DEFAULT 3999.00,
     interval VARCHAR(20) DEFAULT 'Yearly',
-    terminals VARCHAR(100) DEFAULT '1 Counter Terminal',
+    terminals VARCHAR(100) DEFAULT 'Unlimited Terminals',
     status VARCHAR(20) DEFAULT 'Active',
     is_popular BOOLEAN DEFAULT FALSE,
     features TEXT[] DEFAULT '{}',
@@ -246,12 +288,10 @@ DROP POLICY IF EXISTS "Allow service role full management" ON public.packages;
 CREATE POLICY "Allow service role full management"
 ON public.packages FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- 2. Seed Default Packages
+-- 2. Seed Single System Plan
 INSERT INTO public.packages (id, name, code, description, monthly_price, yearly_price, interval, terminals, status, is_popular, features, subscribers_count)
 VALUES 
-('pkg-starter', 'Starter Retail', 'STARTER', 'Essential billing and inventory for small chemists.', 999.00, 9999.00, 'Monthly', '1 Counter Terminal', 'Active', FALSE, ARRAY['POS Billing', 'FEFO Expiry', 'UPI QR'], 1),
-('pkg-pro', 'Professional Chemist', 'PROFESSIONAL', 'For busy retail chemists with multiple billing counters and AI OCR.', 1999.00, 19999.00, 'Yearly', '3 Counter Terminals', 'Active', TRUE, ARRAY['Everything in Starter', 'AI OCR', 'Substitute Finder'], 2),
-('pkg-ent', 'Enterprise Cloud', 'ENTERPRISE', 'For chain pharmacies and wholesale stockists.', 3999.00, 39999.00, 'Yearly', 'Unlimited Terminals', 'Active', FALSE, ARRAY['Everything in Pro', 'Centralized Realtime Sync', '24/7 SLA'], 1)
+('pkg-amb-erp', 'AMB MedERP', 'AMB_MEDERP', 'All-in-one pharmacy billing, inventory, FEFO expiry, GST & cloud sync.', 999.00, 3999.00, 'Yearly', 'Unlimited Terminals', 'Active', TRUE, ARRAY['POS Billing', 'FEFO Expiry', 'UPI QR', 'Cloud Sync'], 1)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, monthly_price = EXCLUDED.monthly_price, yearly_price = EXCLUDED.yearly_price;`;
     navigator.clipboard.writeText(sql);
     setCopiedSql(true);
@@ -373,8 +413,55 @@ ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, monthly_price = EXCLUDED.mo
             </div>
           </div>
 
+          {/* Direct UPI Receiving Gateway Settings */}
+          <form
+            onSubmit={handleSaveUpiConfig}
+            className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-xs"
+          >
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                <CreditCard className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-slate-900">Direct UPI Receiving Payment Gateway</div>
+                <div className="text-[11px] text-slate-500">
+                  Customers scan QR codes paying to this UPI ID and submit UTR for manual verification in Users.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-shrink-0">
+              <input
+                type="text"
+                value={merchantPayeeName}
+                onChange={(e) => setMerchantPayeeName(e.target.value)}
+                placeholder="Payee Name"
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:w-44"
+                required
+              />
+              <input
+                type="text"
+                value={merchantUpiId}
+                onChange={(e) => setMerchantUpiId(e.target.value)}
+                placeholder="your-upi@bank"
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:w-56"
+                required
+              />
+              <button
+                type="submit"
+                disabled={savingUpi}
+                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-semibold shadow-2xs transition-colors"
+              >
+                {savingUpi ? 'Saving...' : 'Save UPI ID'}
+              </button>
+            </div>
+            {upiSavedMsg && (
+              <span className="text-emerald-700 font-semibold text-[11px]">{upiSavedMsg}</span>
+            )}
+          </form>
+
           {/* Pricing Package Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className={`grid grid-cols-1 ${filteredPackages.length === 1 ? 'max-w-lg' : 'md:grid-cols-3'} gap-6`}>
             {filteredPackages.map((pkg) => (
               <div
                 key={pkg.id}
@@ -573,7 +660,7 @@ ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, monthly_price = EXCLUDED.mo
                     type="text"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
-                    placeholder="e.g. Starter Retail, Enterprise"
+                    placeholder="e.g. AMB MedERP"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500"
                     required
                   />

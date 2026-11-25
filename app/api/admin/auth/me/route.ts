@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
     admin: {
       userId: session.userId,
       email: session.email,
+      phone: session.phone,
       name: session.name,
       role: session.role,
     },

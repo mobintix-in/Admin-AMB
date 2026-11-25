@@ -151,10 +151,17 @@ export default function UsersPage() {
   const activeCount = users.filter((u) => u.status === 'Active').length;
   const pendingCount = users.filter((u) => u.status === 'Pending').length;
 
-  // Activate user subscription in Supabase
+  // Activate or Manually Verify Pending user subscription in Supabase
   const handleActivate = async (user: AdminUser) => {
-    const fallbackPlan = user.plan || packages[0]?.name || 'Starter Retail';
-    const defaultExpiry = user.expires_at || formatDisplayExpiry(computeExpiryIso('1 year'));
+    const fallbackPlan = user.plan || packages[0]?.name || 'AMB MedERP';
+    const duration = user.plan_duration || '1 year';
+    const nextExpiry =
+      user.status === 'Pending' || !user.expires_at
+        ? formatDisplayExpiry(computeExpiryIso(duration))
+        : user.expires_at;
+    const nextUtrNote =
+      user.status === 'Pending' ? 'Manually verified by Admin' : user.utr_note;
+
     const prevUsers = users;
     const updatedUsers = users.map((u) =>
       u.id === user.id
@@ -162,8 +169,9 @@ export default function UsersPage() {
             ...u,
             status: 'Active' as const,
             plan: fallbackPlan,
-            plan_duration: u.plan_duration || '1 year',
-            expires_at: defaultExpiry,
+            plan_duration: duration,
+            expires_at: nextExpiry,
+            utr_note: nextUtrNote,
           }
         : u
     );
@@ -177,8 +185,9 @@ export default function UsersPage() {
           userId: user.id,
           status: 'Active',
           plan: fallbackPlan,
-          plan_duration: user.plan_duration || '1 year',
-          expires_at: defaultExpiry,
+          plan_duration: duration,
+          expires_at: nextExpiry,
+          ...(nextUtrNote !== undefined ? { utr_note: nextUtrNote } : {}),
         }),
       });
       const json = await res.json();
@@ -189,6 +198,51 @@ export default function UsersPage() {
     } catch (err) {
       console.error(err);
       alert('Network error activating user.');
+      setUsers(prevUsers);
+    }
+  };
+
+  // Reject a pending UPI payment request
+  const handleRejectPending = async (user: AdminUser) => {
+    if (!confirm(`Reject pending UPI payment for ${user.name} (UTR: ${user.utr_ref || 'N/A'})?`)) return;
+
+    const prevUsers = users;
+    setUsers(
+      users.map((u) =>
+        u.id === user.id
+          ? {
+              ...u,
+              status: 'No plan' as const,
+              plan: undefined,
+              plan_duration: undefined,
+              expires_at: undefined,
+              utr_note: 'Payment rejected by Admin',
+            }
+          : u
+      )
+    );
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          status: 'No plan',
+          plan: null,
+          plan_duration: null,
+          expires_at: null,
+          utr_note: 'Payment rejected by Admin',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        alert(json.error || 'Failed to reject payment.');
+        setUsers(prevUsers);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error rejecting payment.');
       setUsers(prevUsers);
     }
   };
@@ -507,6 +561,10 @@ export default function UsersPage() {
                             <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-emerald-100/80 text-emerald-800 text-[11px] font-bold">
                               Active
                             </span>
+                          ) : user.status === 'Expired' ? (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-rose-100/80 text-rose-700 text-[11px] font-bold">
+                              Expired
+                            </span>
                           ) : user.status === 'Pending' ? (
                             <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-100/80 text-amber-800 text-[11px] font-bold">
                               Pending
@@ -520,7 +578,7 @@ export default function UsersPage() {
 
                         {/* PLAN (CLICK TO CHANGE PACKAGE FOR THIS USER) */}
                         <td className="px-6 py-4.5 align-top">
-                          {user.status === 'Active' && user.plan ? (
+                          {(user.status === 'Active' || user.status === 'Expired' || user.status === 'Pending') && user.plan ? (
                             <div className="space-y-0.5">
                               <button
                                 onClick={() => openChangePackageModal(user)}
@@ -565,7 +623,7 @@ export default function UsersPage() {
                           {user.expires_at || '—'}
                         </td>
 
-                        {/* ACTIONS (ACTIVATE / REVOKE + DELETE USER) */}
+                        {/* ACTIONS (VERIFY / ACTIVATE / REVOKE + DELETE USER) */}
                         <td className="px-6 py-4.5 align-top text-right">
                           <div className="inline-flex items-center gap-1.5 justify-end">
                             {user.status === 'Active' ? (
@@ -575,6 +633,23 @@ export default function UsersPage() {
                               >
                                 Revoke
                               </button>
+                            ) : user.status === 'Pending' ? (
+                              <>
+                                <button
+                                  onClick={() => handleActivate(user)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold text-xs shadow-xs transition-all"
+                                  title="Verify UPI UTR & Activate Subscription"
+                                >
+                                  Verify &amp; Activate
+                                </button>
+                                <button
+                                  onClick={() => handleRejectPending(user)}
+                                  className="px-2.5 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-600 font-semibold text-xs transition-colors"
+                                  title="Reject Payment"
+                                >
+                                  Reject
+                                </button>
+                              </>
                             ) : (
                               <button
                                 onClick={() => handleActivate(user)}

@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient, AdminUser } from '@/lib/supabase';
 import { requireAdminSession } from '@/lib/admin-auth';
 
+function isExpiryPast(expiresAt?: string | null): boolean {
+  const clean = (expiresAt || '').trim();
+  if (!clean || clean === '—' || clean.toLowerCase() === 'lifetime') return false;
+  const d = new Date(clean);
+  if (isNaN(d.getTime())) return false;
+  d.setHours(23, 59, 59, 999);
+  return d.getTime() < Date.now();
+}
+
 // GET: List all users from Supabase Auth
 export async function GET(req: NextRequest) {
   const session = await requireAdminSession(req);
@@ -27,6 +36,12 @@ export async function GET(req: NextRequest) {
       if (u.email) providers.push('email');
       if (providers.length === 0) providers.push('email');
 
+      const rawStatus = (meta.status as AdminUser['status']) || (meta.plan ? 'Active' : 'No plan');
+      const computedStatus: AdminUser['status'] =
+        rawStatus === 'Active' && meta.plan && isExpiryPast(meta.expires_at)
+          ? 'Expired'
+          : rawStatus;
+
       return {
         id: u.id,
         email: u.email || '',
@@ -38,7 +53,7 @@ export async function GET(req: NextRequest) {
         drug_license_no: meta.drug_license_no || '',
         gstin: meta.gstin || '',
         login_providers: providers,
-        status: (meta.status as any) || (meta.plan ? 'Active' : 'No plan'),
+        status: computedStatus,
         plan: meta.plan || undefined,
         plan_duration: meta.plan_duration || undefined,
         utr_ref: meta.utr_ref || undefined,

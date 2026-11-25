@@ -2,9 +2,34 @@ import { NextRequest } from 'next/server';
 
 export const ADMIN_SESSION_COOKIE = 'amb_admin_session';
 
+export const ALLOWED_ADMIN_EMAIL = (
+  process.env.ADMIN_ALLOWED_EMAIL || 'aryanbhimani0011@gmail.com'
+)
+  .trim()
+  .toLowerCase();
+
+export const ALLOWED_ADMIN_PHONE = (
+  process.env.ADMIN_ALLOWED_PHONE || '9409383803'
+)
+  .replace(/[^0-9]/g, '')
+  .slice(-10);
+
+export function normalizeIndianPhone(phone?: string | null): string {
+  return String(phone || '')
+    .replace(/[^0-9]/g, '')
+    .slice(-10);
+}
+
+export function isAuthorizedSuperAdmin(email?: string | null, phone?: string | null): boolean {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const cleanPhone = normalizeIndianPhone(phone);
+  return cleanEmail === ALLOWED_ADMIN_EMAIL && cleanPhone === ALLOWED_ADMIN_PHONE;
+}
+
 export interface AdminSession {
   userId: string;
   email: string;
+  phone: string;
   name: string;
   role: string;
   exp: number;
@@ -83,7 +108,12 @@ export async function verifyAdminSessionToken(token?: string | null): Promise<Ad
 
     const payloadJson = new TextDecoder().decode(fromBase64Url(encodedPayload));
     const parsed = JSON.parse(payloadJson) as AdminSession;
-    if (!parsed.email || !parsed.exp || parsed.exp < Date.now()) {
+    if (
+      !parsed.email ||
+      !parsed.exp ||
+      parsed.exp < Date.now() ||
+      !isAuthorizedSuperAdmin(parsed.email, parsed.phone)
+    ) {
       return null;
     }
     return parsed;

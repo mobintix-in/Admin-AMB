@@ -80,7 +80,7 @@ export interface AdminUser {
   drug_license_no?: string;
   gstin?: string;
   login_providers?: string[];
-  status?: 'Active' | 'No plan' | 'Pending';
+  status?: 'Active' | 'No plan' | 'Pending' | 'Expired';
   plan?: string;
   plan_duration?: string;
   utr_ref?: string;

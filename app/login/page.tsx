@@ -6,7 +6,7 @@ import { ShieldCheck, Mail, Lock, ArrowRight, AlertCircle, Loader2 } from 'lucid
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,8 +15,8 @@ export default function AdminLoginPage() {
     e.preventDefault();
     setError(null);
 
-    if (!email.trim() || !password.trim()) {
-      setError('Please enter your admin email and password.');
+    if (!identifier.trim() || !password.trim()) {
+      setError('Please enter your authorized admin email or mobile number and password.');
       return;
     }
 
@@ -26,7 +26,7 @@ export default function AdminLoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: email.trim(),
+          identifier: identifier.trim(),
           password: password.trim(),
         }),
       });
@@ -75,15 +75,15 @@ export default function AdminLoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4 text-xs">
             <div className="space-y-1.5">
-              <label className="font-semibold text-slate-700 block">Admin Email *</label>
+              <label className="font-semibold text-slate-700 block">Admin Email or Mobile Number *</label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@pharmacy.in"
-                  autoComplete="email"
+                  type="text"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="aryanbhimani0011@gmail.com or 9409383803"
+                  autoComplete="username"
                   className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   required
                 />
@@ -126,7 +126,7 @@ export default function AdminLoginPage() {
           </form>
 
           <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-400 text-center">
-            Authenticated against Supabase Auth • ADMIN role required
+            Restricted Access • Authorized Super Admin Account Only
           </div>
         </div>
       </div>
